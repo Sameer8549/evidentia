@@ -74,7 +74,7 @@ def test_deterministic_checks():
 
 
 def test_match_claim_normalizes_whitespace_and_preserves_source_offsets():
-    source_text = "Deadline:\\n 18   October 2026"
+    source_text = "Deadline:\n 18   October 2026"
     start = source_text.index("18")
     end = source_text.index("2026") + len("2026")
     ocr_page = OCRPageResult(
@@ -91,7 +91,7 @@ def test_match_claim_normalizes_whitespace_and_preserves_source_offsets():
 
     record = match_claim_to_evidence(
         candidate_value="18 October 2026",
-        quotation="18   October\\n2026",
+        quotation="18   October\n2026",
         fact_type="dates_and_deadlines",
         ocr_pages=[ocr_page],
     )
@@ -107,7 +107,6 @@ def test_match_claim_normalizes_whitespace_and_preserves_source_offsets():
 
 def test_match_claim_records_duplicate_quotes_on_same_page():
     source_text = "Required: ID proof. Bring ID proof."
-    quote_start = 10
     ocr_page = OCRPageResult(
         page_index=0,
         text=source_text,
