@@ -3,12 +3,11 @@ from pathlib import Path
 import json
 
 from app.config import settings
-from app.ocr import process_ocr
-from app.analyze import analyze_document_page
+from app.ocr import perform_ocr
 from app.ollama_client import OllamaClient
 from app.evidence import match_claim_to_evidence, run_deterministic_checks, EvidenceRecord
 from app.receipt import EvidenceReceipt, ReceiptMetadata, ReceiptProcessing
-from app.schemas import PageAnalysisSchema
+from app.analyze import PageAnalysisSchema
 from app.resources import enrich_resources
 
 router = APIRouter()
@@ -28,7 +27,10 @@ async def run_inspection(ingestion_id: str, fetch_resources: bool = False):
         
     # 1. Run OCR
     try:
-        ocr_results = process_ocr(ingestion_id)
+        # Note: perform_ocr usually returns a Response when called via router, but we can await it
+        ocr_response_obj = await perform_ocr(ingestion_id)
+        # However, perform_ocr returns OCRResponse which has .pages
+        ocr_results = getattr(ocr_response_obj, 'pages', [])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OCR failed: {e}")
         

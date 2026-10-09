@@ -14,7 +14,7 @@ async def test_inspect_not_found(async_client: AsyncClient):
     assert response.status_code == 404
 
 @pytest.mark.asyncio
-@patch('app.inspect.process_ocr')
+@patch('app.inspect.perform_ocr')
 @patch('app.inspect.OllamaClient.check_health')
 @patch('app.inspect.OllamaClient.analyze_document_page')
 async def test_inspect_success(mock_analyze, mock_health, mock_ocr, async_client: AsyncClient):
@@ -33,7 +33,7 @@ async def test_inspect_success(mock_analyze, mock_health, mock_ocr, async_client
     
     ingestion_id = "test-inspect-123"
     ingestion_dir = Path(settings.evidentia_data_dir) / ingestion_id
-    ingestion_dir.mkdir(parents=True)
+    ingestion_dir.mkdir(parents=True, exist_ok=True)
     
     with open(ingestion_dir / "metadata.json", "w") as f:
         json.dump({
