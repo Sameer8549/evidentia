@@ -63,8 +63,8 @@ async def test_verify_receipt_valid(async_client: AsyncClient, tmp_path: Path):
     receipt_path = tmp_path / "receipt.json"
     source_path = tmp_path / "source.bin"
     
-    # Just mock verify.py success by patching subprocess.run inside inspect.py
-    with patch("app.inspect.subprocess.run") as mock_run:
+    # Just mock verify.py success by patching subprocess.run globally
+    with patch("subprocess.run") as mock_run:
         mock_run.return_value.returncode = 0
         mock_run.return_value.stdout = "[PASS] Evidence receipt is valid."
         

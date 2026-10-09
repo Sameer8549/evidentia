@@ -155,10 +155,10 @@ async def test_analyze_integration(async_client: AsyncClient):
     is_notice = "Notice" in analysis_dict.get("document_type", "") or "notice" in analysis_dict.get("document_type", "").lower()
     assert is_notice, "Document type should be classified as Notice"
     
-    dates = [d.get("candidate_value", d.get("fact_description", "")).lower() for d in analysis_dict.get("dates_and_deadlines", [])]
+    dates = [f"{d.get('fact_description', '')} {d.get('quotation', '')}".lower() for d in analysis_dict.get("dates_and_deadlines", [])]
     has_deadline = any("18" in d or "october" in d for d in dates)
     assert has_deadline, f"Did not extract 18 October 2026. Found: {dates}"
     
-    docs = [d.get("candidate_value", d.get("fact_description", "")).lower() for d in analysis_dict.get("required_documents", [])]
+    docs = [f"{d.get('fact_description', '')} {d.get('quotation', '')}".lower() for d in analysis_dict.get("required_documents", [])]
     has_docs = any("id" in d or "proof" in d for d in docs)
     assert has_docs, f"Did not extract ID proof. Found: {docs}"
