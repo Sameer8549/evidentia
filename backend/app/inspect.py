@@ -95,11 +95,21 @@ async def _run_inspection_task_inner(ingestion_id: str, fetch_resources: bool):
     update_job_stage(ingestion_id, "ocr")
     try:
         ocr_response_obj = await perform_ocr(ingestion_id)
-        ocr_results = getattr(ocr_response_obj, 'pages', [])
+        ocr_results = getattr(ocr_response_obj, "pages", [])
+        if not ocr_results:
+            update_job_stage(ingestion_id, "failed", status="failed", error="OCR returned no pages")
+            return
     except Exception as e:
         update_job_stage(ingestion_id, "failed", status="failed", error=f"OCR failed: {e}")
         return
-        
+
+    # A blank/unreadable OCR page means this receipt cannot be described as a fully
+    # completed text-evidence workflow even if vision inference itself succeeds.
+    ocr_has_issues = any(
+        bool(getattr(page, "warnings", [])) or not str(getattr(page, "text", "")).strip()
+        for page in ocr_results
+    )
+
     # 2. Run Analyze
     update_job_stage(ingestion_id, "analyzing")
     client = OllamaClient()
@@ -121,7 +131,7 @@ async def _run_inspection_task_inner(ingestion_id: str, fetch_resources: bool):
         page_files = [original_path]
         
     analysis_results = []
-    global_status = "COMPLETED"
+    global_status = "PARTIAL" if ocr_has_issues else "COMPLETED"
     total_pages = len(page_files)
     
     for idx, page_path in enumerate(page_files):
