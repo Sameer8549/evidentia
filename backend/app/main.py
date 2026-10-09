@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     evidentia_data_dir: str = ".local"
     evidentia_max_upload_mb: int = 20
     evidentia_max_pages: int = 20
+    evidentia_max_image_dim: int = 8000
+    evidentia_max_image_pixels: int = 40000000
 
     model_config = SettingsConfigDict(env_file=".env")
 
