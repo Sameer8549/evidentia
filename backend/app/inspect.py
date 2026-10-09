@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks, File, UploadFile
 from fastapi.responses import JSONResponse
 from pathlib import Path
+import hashlib
 import json
+import re
 import asyncio
 
 from app.config import settings
@@ -15,6 +17,26 @@ from app.jobs import init_job, update_job_stage, update_job_progress, load_job
 
 router = APIRouter()
 
+
+def _resolve_ingestion_dir(ingestion_id: str) -> Path:
+    """Resolve an ingestion directory without permitting path traversal."""
+    data_dir = Path(settings.evidentia_data_dir).resolve()
+    target = (data_dir / ingestion_id).resolve()
+    try:
+        target.relative_to(data_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid ingestion ID.") from exc
+    return target
+
+
+def _source_sha256(source_path: Path) -> str:
+    digest = hashlib.sha256()
+    with source_path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 async def _run_inspection_task(ingestion_id: str, fetch_resources: bool):
     try:
         await _run_inspection_task_inner(ingestion_id, fetch_resources)
@@ -22,18 +44,50 @@ async def _run_inspection_task(ingestion_id: str, fetch_resources: bool):
         update_job_stage(ingestion_id, "failed", status="failed", error=f"Unexpected error: {e}")
 
 async def _run_inspection_task_inner(ingestion_id: str, fetch_resources: bool):
-    ingestion_dir = Path(settings.evidentia_data_dir) / ingestion_id
-    if not ingestion_dir.exists():
+    try:
+        ingestion_dir = _resolve_ingestion_dir(ingestion_id)
+    except HTTPException as exc:
+        update_job_stage(ingestion_id, "failed", status="failed", error=str(exc.detail))
+        return
+    if not ingestion_dir.exists() or not ingestion_dir.is_dir():
         update_job_stage(ingestion_id, "failed", status="failed", error="Ingestion ID not found")
         return
-        
+
     meta_file = ingestion_dir / "metadata.json"
-    if not meta_file.exists():
-        update_job_stage(ingestion_id, "failed", status="failed", error="Ingestion metadata not found")
+    source_path = ingestion_dir / "original"
+    if not meta_file.is_file() or not source_path.is_file():
+        update_job_stage(ingestion_id, "failed", status="failed", error="Source or ingestion metadata is missing")
         return
-        
-    with open(meta_file, 'r', encoding='utf-8') as f:
-        metadata = json.load(f)
+
+    try:
+        with meta_file.open("r", encoding="utf-8") as metadata_file:
+            metadata = json.load(metadata_file)
+    except (OSError, json.JSONDecodeError) as exc:
+        update_job_stage(ingestion_id, "failed", status="failed", error=f"Invalid ingestion metadata: {exc}")
+        return
+
+    expected_hash = metadata.get("sha256") if isinstance(metadata, dict) else None
+    expected_filename = metadata.get("original_filename") if isinstance(metadata, dict) else None
+    expected_type = metadata.get("content_type") if isinstance(metadata, dict) else None
+    if (
+        not isinstance(expected_hash, str)
+        or not re.fullmatch(r"[0-9a-fA-F]{64}", expected_hash)
+        or not isinstance(expected_filename, str)
+        or not expected_filename.strip()
+        or not isinstance(expected_type, str)
+        or not expected_type.strip()
+    ):
+        update_job_stage(ingestion_id, "failed", status="failed", error="Invalid ingestion metadata: required fields or SHA-256 are missing")
+        return
+
+    try:
+        actual_hash = _source_sha256(source_path)
+    except OSError as exc:
+        update_job_stage(ingestion_id, "failed", status="failed", error=f"Cannot read original source: {exc}")
+        return
+    if actual_hash.lower() != expected_hash.lower():
+        update_job_stage(ingestion_id, "failed", status="failed", error="Original source hash no longer matches ingestion metadata")
+        return
         
     # 1. Run OCR
     update_job_stage(ingestion_id, "ocr")
@@ -53,7 +107,10 @@ async def _run_inspection_task_inner(ingestion_id: str, fetch_resources: bool):
         update_job_stage(ingestion_id, "failed", status="failed", error=f"Ollama/Model error: {e}")
         return
         
-    page_files = sorted([f for f in ingestion_dir.iterdir() if f.name.startswith("page_") and f.name.endswith(".png")])
+    page_files = sorted(
+        [f for f in ingestion_dir.iterdir() if re.fullmatch(r"page_\d+\.png", f.name)],
+        key=lambda path: int(path.stem.split("_")[1]),
+    )
     if not page_files:
         original_path = ingestion_dir / "original"
         if not original_path.exists():
@@ -89,47 +146,30 @@ async def _run_inspection_task_inner(ingestion_id: str, fetch_resources: bool):
     extracted_facts = []
     actionable_guidance = []
     
+    fact_categories = (
+        ("important_factual_details", "important_factual_details"),
+        ("dates_and_deadlines", "dates_and_deadlines"),
+        ("eligibility_criteria", "eligibility_criteria"),
+        ("fees_and_amounts", "fees_and_amounts"),
+        ("locations_and_jurisdiction", "locations_and_jurisdiction"),
+        ("required_documents", "required_documents"),
+        ("procedures_and_instructions", "procedures_and_instructions"),
+        ("contact_information", "contact_information"),
+    )
     for analysis in analysis_results:
-        if not analysis:
+        if analysis is None:
             continue
-            
         actionable_guidance.extend(analysis.actionable_guidance)
-        
-        for date_item in analysis.dates_and_deadlines:
-            record = match_claim_to_evidence(
-                candidate_value=date_item.fact_description,
-                quotation=date_item.quotation,
-                fact_type="dates_and_deadlines",
-                ocr_pages=ocr_results
-            )
-            extracted_facts.append(record)
-            
-        for doc_item in analysis.required_documents:
-            record = match_claim_to_evidence(
-                candidate_value=doc_item.fact_description,
-                quotation=doc_item.quotation,
-                fact_type="required_documents",
-                ocr_pages=ocr_results
-            )
-            extracted_facts.append(record)
-            
-        for elig_item in analysis.eligibility_criteria:
-            record = match_claim_to_evidence(
-                candidate_value=elig_item.fact_description,
-                quotation=elig_item.quotation,
-                fact_type="eligibility_criteria",
-                ocr_pages=ocr_results
-            )
-            extracted_facts.append(record)
-            
-        for fee_item in analysis.fees_and_amounts:
-            record = match_claim_to_evidence(
-                candidate_value=fee_item.fact_description,
-                quotation=fee_item.quotation,
-                fact_type="fees_and_amounts",
-                ocr_pages=ocr_results
-            )
-            extracted_facts.append(record)
+        for field_name, fact_type in fact_categories:
+            for item in getattr(analysis, field_name, []) or []:
+                extracted_facts.append(
+                    match_claim_to_evidence(
+                        candidate_value=item.fact_description,
+                        quotation=item.quotation,
+                        fact_type=fact_type,
+                        ocr_pages=ocr_results,
+                    )
+                )
 
     # 4. Run Deterministic checks
     update_job_stage(ingestion_id, "generating_receipt")
@@ -186,7 +226,8 @@ async def _run_inspection_task_inner(ingestion_id: str, fetch_resources: bool):
             f.write(receipt.model_dump_json(indent=2))
             
         final_stage = "completed" if global_status == "COMPLETED" else "partial"
-        update_job_stage(ingestion_id, final_stage, status="completed", receipt_available=True)
+        final_status = "completed" if global_status == "COMPLETED" else "partial"
+        update_job_stage(ingestion_id, final_stage, status=final_status, receipt_available=True)
     except Exception as e:
         update_job_stage(ingestion_id, "failed", status="failed", error=f"Receipt generation failed: {e}")
         return
@@ -194,8 +235,8 @@ async def _run_inspection_task_inner(ingestion_id: str, fetch_resources: bool):
 @router.post("/api/inspect/{ingestion_id}")
 async def run_inspection(ingestion_id: str, fetch_resources: bool = False):
     """Backward-compatible synchronous inspection endpoint."""
-    ingestion_dir = Path(settings.evidentia_data_dir) / ingestion_id
-    if not ingestion_dir.exists():
+    ingestion_dir = _resolve_ingestion_dir(ingestion_id)
+    if not ingestion_dir.exists() or not ingestion_dir.is_dir():
         raise HTTPException(status_code=404, detail="Ingestion ID not found")
         
     init_job(ingestion_id)
@@ -218,8 +259,8 @@ async def run_inspection(ingestion_id: str, fetch_resources: bool = False):
 @router.post("/api/inspect/{ingestion_id}/job")
 async def start_inspection_job(ingestion_id: str, background_tasks: BackgroundTasks, fetch_resources: bool = False):
     """Start an inspection job asynchronously."""
-    ingestion_dir = Path(settings.evidentia_data_dir) / ingestion_id
-    if not ingestion_dir.exists():
+    ingestion_dir = _resolve_ingestion_dir(ingestion_id)
+    if not ingestion_dir.exists() or not ingestion_dir.is_dir():
         raise HTTPException(status_code=404, detail="Ingestion ID not found")
         
     job = load_job(ingestion_id)
@@ -236,6 +277,7 @@ async def start_inspection_job(ingestion_id: str, background_tasks: BackgroundTa
 @router.get("/api/inspect/{ingestion_id}/job")
 async def get_inspection_job(ingestion_id: str):
     """Get the status of an inspection job."""
+    _resolve_ingestion_dir(ingestion_id)
     job = load_job(ingestion_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -244,7 +286,8 @@ async def get_inspection_job(ingestion_id: str):
 @router.get("/api/inspect/{ingestion_id}/receipt")
 async def get_receipt(ingestion_id: str):
     """Download the receipt."""
-    receipt_path = Path(settings.evidentia_data_dir) / ingestion_id / "receipt.json"
+    ingestion_dir = _resolve_ingestion_dir(ingestion_id)
+    receipt_path = ingestion_dir / "receipt.json"
     if not receipt_path.exists():
         raise HTTPException(status_code=404, detail="Receipt not found")
     with open(receipt_path, 'r', encoding='utf-8') as f:
