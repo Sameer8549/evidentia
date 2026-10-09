@@ -1,92 +1,116 @@
 # Evidentia Backend
 
-## Dependencies and Setup
+Evidentia — Make AI show its evidence. This is the complete backend system for multimodal verifiable intelligence processing.
+
+## 🚀 Setup and Installation
+
+Follow these steps exactly to prepare your local development environment.
 
 ### 1. Python Environment
-- Install Python 3.11+
-- Install dependencies using Poetry:
-  ```bash
-  poetry install
-  ```
-  (Alternatively, use `pip install -r requirements.txt` if maintaining standard pip).
+Install Python 3.11+. We use Poetry for dependency management.
+```powershell
+poetry install
+```
 
-### 2. Tesseract OCR (Required for OCR functionality)
+### 2. Install and Configure Tesseract OCR
 Tesseract is a required system-level dependency.
 - **Windows**: Download and install the Tesseract executable (e.g., from UB-Mannheim).
 - Verify the English language pack (`eng`) is installed.
-- Open `.env` and set the path to your executable if it's not in your system `PATH`:
-  ```env
-  EVIDENTIA_TESSERACT_CMD="C:\Program Files\Tesseract-OCR\tesseract.exe"
+- Open your `.env` file (see step 4) and configure the `EVIDENTIA_TESSERACT_CMD` path to point exactly to your `tesseract.exe`.
+
+### 3. Install Ollama and Pull Gemma 4
+The application performs real local vision inference using Gemma 4.
+- Install [Ollama](https://ollama.com).
+- Start the Ollama server locally.
+- Pull the Gemma 4 model:
+  ```powershell
+  ollama pull gemma4:e4b
   ```
-- **Linux/Mac**: Install via your package manager (e.g., `apt install tesseract-ocr`). `EVIDENTIA_TESSERACT_CMD` can be left as `tesseract`.
 
-### 3. Environment Variables
-Copy `.env.example` to `.env` and adjust settings. 
+### 4. Environment Configuration
+Copy the provided `.env.example` file to create your local configuration:
+```powershell
+cp .env.example .env
+```
+Ensure that `EVIDENTIA_OLLAMA_MODEL` is set to `gemma4:e4b` (or your configured model) and that `EVIDENTIA_TESSERACT_CMD` is accurate.
 
-## Running the API
-Start the server using uvicorn:
-```bash
-poetry run uvicorn app.main:app --reload
+---
+
+## 💻 Running the Demo Workflow
+
+The backend exposes APIs for uploading documents, inspecting them (OCR + Inference + Checking), retrieving results, and validating integrity.
+
+### 5. Start the API Server and Run Health Checks
+Run the FastAPI application via Uvicorn:
+```powershell
+poetry run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+*(Optionally run `poetry run ruff check app tests verify.py` to check for lint issues).*
+
+In a new PowerShell window, test if the API is live and dependencies are ready:
+```powershell
+Invoke-RestMethod -Uri http://127.0.0.1:8000/health/live
+Invoke-RestMethod -Uri http://127.0.0.1:8000/health/ready
 ```
 
-## API Usage
-
-### 1. Document Ingestion
-**Endpoint**: `POST /api/ingest`
-- Send a multipart form upload with a file (PDF, PNG, JPEG, WEBP).
-- Returns an `ingestion_id`, detected type, size, SHA-256 hash, and dimensions.
-
-### 2. OCR Processing
-**Endpoint**: `POST /api/ocr/{ingestion_id}`
-- Triggers Tesseract OCR on the previously ingested document.
-- Returns a structured response containing:
-  - `page_index` (0-based)
-  - Full reconstructed text
-  - Granular word-level coordinate boundaries mapping directly to the pixel space (`x`, `y`, `width`, `height`).
-  - Coordinate convention: Origin `(0, 0)` is the top-left corner of the image.
-  - Character alignment spans (`char_start`, `char_end`) aligning with the reconstructed text array to assist later highlight correlation.
-
-### 4. End-to-End Workflow Inspection
-**Endpoint**: `POST /api/inspect/{ingestion_id}?fetch_resources=true`
-- Orchestrates the full process: OCR -> Multimodal Extraction -> Evidence Matching -> Deterministic Checks -> Enrichment -> Receipt Generation.
-- Generates an offline verifiable `receipt.json`.
-
-## Local Mentor Demonstration
-You can run a complete offline demonstration using terminal tools:
-
-1. **Start the API Server**
-```bash
-poetry run fastapi dev app/main.py --host 127.0.0.1 --port 8000
-```
-2. **Check System Readiness**
-```bash
-curl http://127.0.0.1:8000/health/ready
-```
-3. **Run Ingestion**
-```bash
-# Upload a notice document
-curl -X POST -F "file=@sample_notice.pdf" http://127.0.0.1:8000/api/ingest
-```
-*(Copy the returned `ingestion_id`)*
-
-4. **Run E2E Inspection**
-```bash
-curl -X POST http://127.0.0.1:8000/api/inspect/<INGESTION_ID>?fetch_resources=true
+### 6. Upload a Test Document
+Submit an image or PDF to the ingestion API:
+```powershell
+$response = Invoke-RestMethod -Uri http://127.0.0.1:8000/api/ingest -Method Post -Form @{file=(Get-Item -Path .\sample_notice.pdf)}
+$ingestionId = $response.ingestion_id
+Write-Output "Ingestion ID: $ingestionId"
 ```
 
-5. **Standalone Offline Verification**
-```bash
-poetry run python verify.py .local/<INGESTION_ID>/receipt.json --source sample_notice.pdf
+### 7. Inspect the Document (Asynchronous Job)
+Start the background inspection job:
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/inspect/$ingestionId/job?fetch_resources=true" -Method Post
+```
+Poll the job status until it says "completed":
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/inspect/$ingestionId/job"
+```
+*(Alternatively, you can call `POST /api/inspect/$ingestionId` to block synchronously until complete).*
+
+### 8. Retrieve the Evidence Receipt
+Once inspection is completed, download the receipt:
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/inspect/$ingestionId/receipt" | ConvertTo-Json -Depth 10 | Out-File "receipt.json"
 ```
 
-## Testing
-Run all unit, integration, and E2E tests:
-```bash
-poetry run pytest
+### 9. Verify the Receipt Offline
+Use the independent `verify.py` script to re-verify the digest and source hash without LLM or network access:
+```powershell
+poetry run python verify.py receipt.json --source sample_notice.pdf
 ```
-*Note: Real OCR and Multimodal integration tests are executed only if Tesseract and Ollama (with Gemma 4) are detected natively on the host system. Missing dependencies safely skip without causing false test failures.*
 
-## Known Limitations
-- OCR does not confirm truthfulness of recognized text; it only executes pattern recognition of document pixels.
-- Blank pages or pages with exceptionally complex noise might raise empty-text warnings.
-- Gemma 4 runs purely locally. Model hallucinations in JSON schema matching may trigger validation errors in complex edge cases.
+### 10. Test Source and Receipt Tampering
+Prove the system's integrity by attempting to forge the document or receipt:
+
+**Tamper the source:**
+```powershell
+Add-Content -Path sample_notice.pdf -Value "tamper data"
+poetry run python verify.py receipt.json --source sample_notice.pdf
+# Expected: FAIL - Source hash mismatch!
+```
+
+**Tamper the receipt:**
+```powershell
+(Get-Content receipt.json).Replace('"COMPLETED"', '"FAKE_STATUS"') | Set-Content receipt.json
+poetry run python verify.py receipt.json --source sample_notice.pdf
+# Expected: FAIL - Receipt digest mismatch!
+```
+
+### 11. Explore the API Docs
+A full OpenAPI documentation UI is provided by FastAPI. Visit:
+[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) in your browser.
+
+---
+
+## 🧪 Testing
+
+Run all unit and End-to-End integration tests using Pytest:
+```powershell
+poetry run pytest -v
+```
+*Note: Real OCR and Multimodal integration tests run dynamically if dependencies are met. They skip safely if unavailable, ensuring CI pipelines stay green while allowing strict local validation.*
