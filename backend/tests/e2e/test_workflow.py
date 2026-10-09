@@ -131,7 +131,7 @@ async def test_full_workflow_e2e(async_client: AsyncClient):
         with open(receipt_path, "r", encoding="utf-8") as f:
             tampered_receipt = json.load(f)
             
-        tampered_receipt["global_status"] = "FAKE_STATUS"
+        tampered_receipt["document_summary"] = "TAMPERED SUMMARY"
         
         with open(receipt_path, "w", encoding="utf-8") as f:
             json.dump(tampered_receipt, f)
