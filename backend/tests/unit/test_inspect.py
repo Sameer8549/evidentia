@@ -2,11 +2,13 @@ import pytest
 from httpx import AsyncClient
 from unittest.mock import patch
 from pathlib import Path
+from types import SimpleNamespace
 from PIL import Image, ImageDraw
 import json
 import hashlib
 
 from app.config import settings
+from app.ocr import OCRPageResult, OCRWord
 import app.inspect
 
 @pytest.mark.asyncio
@@ -20,7 +22,6 @@ async def test_inspect_not_found(async_client: AsyncClient):
 @patch('app.inspect.OllamaClient.analyze_document_page')
 async def test_inspect_success(mock_analyze, mock_health, mock_ocr, async_client: AsyncClient):
     mock_health.return_value = True
-    mock_ocr.return_value = []
     
     from app.analyze import PageAnalysisSchema
     mock_analyze.return_value = PageAnalysisSchema(
@@ -35,6 +36,24 @@ async def test_inspect_success(mock_analyze, mock_health, mock_ocr, async_client
     )
     
     ingestion_id = "test-inspect-123"
+    ocr_text = "Application deadline: 18 October 2026"
+    mock_ocr.return_value = SimpleNamespace(
+        pages=[
+            OCRPageResult(
+                page_index=0,
+                text=ocr_text,
+                words=[
+                    OCRWord(text="Application", x=10, y=10, width=50, height=10, confidence=99, char_start=0, char_end=11),
+                    OCRWord(text="deadline:", x=65, y=10, width=45, height=10, confidence=99, char_start=12, char_end=21),
+                    OCRWord(text="18", x=115, y=10, width=15, height=10, confidence=99, char_start=22, char_end=24),
+                    OCRWord(text="October", x=135, y=10, width=45, height=10, confidence=99, char_start=25, char_end=32),
+                    OCRWord(text="2026", x=185, y=10, width=30, height=10, confidence=99, char_start=33, char_end=37),
+                ],
+                width=300,
+                height=100,
+            )
+        ]
+    )
     ingestion_dir = Path(settings.evidentia_data_dir) / ingestion_id
     ingestion_dir.mkdir(parents=True, exist_ok=True)
     
