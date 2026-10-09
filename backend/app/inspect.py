@@ -1,10 +1,12 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks, File, UploadFile
 from fastapi.responses import JSONResponse
 from pathlib import Path
+import asyncio
 import hashlib
 import json
 import re
-import asyncio
+import subprocess
+import sys
 
 from app.config import settings
 from app.ocr import perform_ocr
@@ -297,9 +299,7 @@ async def get_receipt(ingestion_id: str):
 async def verify_receipt(receipt_file: UploadFile = File(...), source_file: UploadFile = File(...)):
     """Verify a receipt against a source file."""
     import tempfile
-    import sys
-    import subprocess
-    
+
     max_bytes = settings.evidentia_max_upload_mb * 1024 * 1024
     
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -326,11 +326,30 @@ async def verify_receipt(receipt_file: UploadFile = File(...), source_file: Uplo
                 
         verify_script = Path(__file__).parent.parent / "verify.py"
         
-        result = subprocess.run([
-            sys.executable, str(verify_script), str(tmp_receipt), "--source", str(tmp_source)
-        ], capture_output=True, text=True)
-        
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                [sys.executable, str(verify_script), str(tmp_receipt), "--source", str(tmp_source)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return JSONResponse(
+                status_code=504,
+                content={"verified": False, "details": "Offline receipt verification timed out."},
+            )
+        except OSError as exc:
+            return JSONResponse(
+                status_code=503,
+                content={"verified": False, "details": f"Could not launch the offline verifier: {exc}"},
+            )
+
         if result.returncode != 0:
-            return JSONResponse(status_code=400, content={"verified": False, "details": result.stderr or result.stdout})
-            
+            return JSONResponse(
+                status_code=400,
+                content={"verified": False, "details": result.stderr or result.stdout},
+            )
+
         return {"verified": True, "details": result.stdout}
