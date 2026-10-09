@@ -4,6 +4,7 @@ from unittest.mock import patch
 from pathlib import Path
 from PIL import Image, ImageDraw
 import json
+import hashlib
 
 from app.config import settings
 import app.inspect
@@ -27,7 +28,7 @@ async def test_inspect_success(mock_analyze, mock_health, mock_ocr, async_client
         dates_and_deadlines=[
             {
                 "fact_description": "18 October 2026",
-                "candidate_quotation": "18 October 2026",
+                "quotation": "18 October 2026",
                 "is_missing_or_unknown": False
             }
         ]
@@ -37,22 +38,26 @@ async def test_inspect_success(mock_analyze, mock_health, mock_ocr, async_client
     ingestion_dir = Path(settings.evidentia_data_dir) / ingestion_id
     ingestion_dir.mkdir(parents=True, exist_ok=True)
     
-    with open(ingestion_dir / "metadata.json", "w") as f:
-        json.dump({
-            "sha256": "testhash",
-            "original_filename": "test.pdf",
-            "content_type": "application/pdf"
-        }, f)
-        
     img = Image.new("RGB", (100, 100), color="white")
+    img.save(ingestion_dir / "original", format="PNG")
     img.save(ingestion_dir / "page_0.png")
+    source_hash = hashlib.sha256((ingestion_dir / "original").read_bytes()).hexdigest()
+
+    with open(ingestion_dir / "metadata.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "sha256": source_hash,
+            "original_filename": "test.png",
+            "content_type": "image/png",
+            "size": (ingestion_dir / "original").stat().st_size,
+            "pages": 1
+        }, f)
     
     response = await async_client.post(f"/api/inspect/{ingestion_id}")
     assert response.status_code == 200
     
     data = response.json()
     assert data["schema_version"] == "1.0.0"
-    assert data["metadata"]["source_sha256"] == "testhash"
+    assert data["metadata"]["source_sha256"] == source_hash
     assert data["global_status"] == "COMPLETED"
     
     # Receipt file should exist
