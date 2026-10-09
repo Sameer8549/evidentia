@@ -41,23 +41,32 @@ async def run_inspection(ingestion_id: str, fetch_resources: bool = False):
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Ollama/Model error: {e}")
         
+    from app.analyze import ANALYSIS_PROMPT
+
     page_files = sorted([f for f in ingestion_dir.iterdir() if f.name.startswith("page_") and f.name.endswith(".png")])
     if not page_files:
-        raise HTTPException(status_code=400, detail="No pages available for analysis.")
+        original_path = ingestion_dir / "original"
+        if not original_path.exists():
+            raise HTTPException(status_code=400, detail="No pages or original file available for analysis.")
+        page_files = [original_path]
         
     analysis_results = []
     global_status = "COMPLETED"
     
     for idx, page_path in enumerate(page_files):
         try:
-            analysis_dict = await client.analyze_document_page(page_path, PageAnalysisSchema)
-            analysis_results.append(analysis_dict)
+            analysis_pydantic = await client.analyze_document_page(
+                image_path=page_path, 
+                prompt=ANALYSIS_PROMPT, 
+                schema_class=PageAnalysisSchema
+            )
+            analysis_results.append(analysis_pydantic)
         except Exception as e:
             global_status = "PARTIAL"
             analysis_results.append(None)
             
     if all(a is None for a in analysis_results):
-        global_status = "FAILED"
+        # We must not output a receipt if everything failed
         raise HTTPException(status_code=500, detail="Analysis failed on all pages.")
         
     # 3. Aggregate facts and match evidence
@@ -68,40 +77,40 @@ async def run_inspection(ingestion_id: str, fetch_resources: bool = False):
         if not analysis:
             continue
             
-        actionable_guidance.extend(analysis.get("actionable_guidance", []))
+        actionable_guidance.extend(analysis.actionable_guidance)
         
         # Iterate through relevant arrays
-        for date_item in analysis.get("dates_and_deadlines", []):
+        for date_item in analysis.dates_and_deadlines:
             record = match_claim_to_evidence(
-                candidate_value=date_item.get("fact_description", ""),
-                quotation=date_item.get("candidate_quotation"),
+                candidate_value=date_item.fact_description,
+                quotation=date_item.quotation,
                 fact_type="dates_and_deadlines",
                 ocr_pages=ocr_results
             )
             extracted_facts.append(record)
             
-        for doc_item in analysis.get("required_documents", []):
+        for doc_item in analysis.required_documents:
             record = match_claim_to_evidence(
-                candidate_value=doc_item.get("fact_description", ""),
-                quotation=doc_item.get("candidate_quotation"),
+                candidate_value=doc_item.fact_description,
+                quotation=doc_item.quotation,
                 fact_type="required_documents",
                 ocr_pages=ocr_results
             )
             extracted_facts.append(record)
             
-        for elig_item in analysis.get("eligibility_criteria", []):
+        for elig_item in analysis.eligibility_criteria:
             record = match_claim_to_evidence(
-                candidate_value=elig_item.get("fact_description", ""),
-                quotation=elig_item.get("candidate_quotation"),
+                candidate_value=elig_item.fact_description,
+                quotation=elig_item.quotation,
                 fact_type="eligibility_criteria",
                 ocr_pages=ocr_results
             )
             extracted_facts.append(record)
             
-        for fee_item in analysis.get("fees_and_amounts", []):
+        for fee_item in analysis.fees_and_amounts:
             record = match_claim_to_evidence(
-                candidate_value=fee_item.get("fact_description", ""),
-                quotation=fee_item.get("candidate_quotation"),
+                candidate_value=fee_item.fact_description,
+                quotation=fee_item.quotation,
                 fact_type="fees_and_amounts",
                 ocr_pages=ocr_results
             )
@@ -124,19 +133,25 @@ async def run_inspection(ingestion_id: str, fetch_resources: bool = False):
         model_tag=client.model
     )
     
+    # Enrich resources if requested
+    resources = enrich_resources(actionable_guidance) if fetch_resources else []
+    
     # use first valid analysis for summary
-    valid_analysis = next((a for a in analysis_results if a is not None), {})
+    valid_analysis = next((a for a in analysis_results if a is not None), None)
     
     receipt = EvidenceReceipt(
         metadata=receipt_meta,
         processing=receipt_proc,
-        document_summary=valid_analysis.get("plain_language_summary"),
-        document_purpose=valid_analysis.get("document_purpose"),
+        document_summary=valid_analysis.plain_language_summary if valid_analysis else "No summary available.",
+        document_purpose=valid_analysis.document_purpose if valid_analysis else "Unknown",
         extracted_facts=extracted_facts,
         deterministic_checks=checks,
-        actionable_guidance=actionable_guidance,
+        actionable_guidance=[step.model_dump() for step in actionable_guidance],
+        resources=[r.model_dump() for r in resources],
         global_status=global_status
     )
+    
+    receipt.receipt_digest = receipt.generate_digest()
     
     # Save receipt
     receipt_path = ingestion_dir / "receipt.json"

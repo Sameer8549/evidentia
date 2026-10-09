@@ -33,11 +33,12 @@ class EvidenceReceipt(BaseModel):
     actionable_guidance: List[Dict[str, Any]] = []
     resources: List[Any] = [] # List[Resource]
     global_status: str
+    receipt_digest: Optional[str] = None
     
     def generate_digest(self) -> str:
         # A simple digest covering key structural parts to detect tampering
         data = self.model_dump(mode="json")
-        data.pop("digest", None)
+        data.pop("receipt_digest", None)
         canonical = json.dumps(data, sort_keys=True, separators=(',', ':'))
         return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 

@@ -60,3 +60,30 @@ async def test_full_workflow_e2e(async_client: AsyncClient):
     
     assert result.returncode == 0
     assert "[PASS]" in result.stdout
+
+    # 5. Tamper with source and check verification fails
+    with open(img_path, "a") as f:
+        f.write("tampered")
+        
+    result_source_tamper = subprocess.run([
+        "python", "verify.py", str(receipt_path), "--source", str(img_path)
+    ], capture_output=True, text=True)
+    assert result_source_tamper.returncode == 1
+    assert "Source hash mismatch" in result_source_tamper.stderr
+    
+    # 6. Tamper with receipt and check digest verification fails
+    with open(receipt_path, "r", encoding="utf-8") as f:
+        tampered_receipt = json.load(f)
+        
+    tampered_receipt["global_status"] = "FAKE_STATUS"
+    
+    with open(receipt_path, "w", encoding="utf-8") as f:
+        json.dump(tampered_receipt, f)
+        
+    result_receipt_tamper = subprocess.run([
+        # Re-use the original source path which doesn't matter since digest fails first
+        "python", "verify.py", str(receipt_path), "--source", str(img_path)
+    ], capture_output=True, text=True)
+    
+    assert result_receipt_tamper.returncode == 1
+    assert "Receipt digest mismatch" in result_receipt_tamper.stderr

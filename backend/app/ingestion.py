@@ -158,6 +158,19 @@ async def ingest_document(file: UploadFile = File(...)):
                 
         # cleanup successful - keeping only needed files (original, and rendered pages)
         # Note: we are keeping `original` as it might be needed for later processing (e.g. OCR PDF)
+        
+        import json
+        metadata = {
+            "sha256": file_hash,
+            "original_filename": sanitized_filename,
+            "content_type": detected_type,
+            "size": file_size,
+            "pages": page_count,
+            "page_dimensions": page_dimensions
+        }
+        with open(ingestion_dir / "metadata.json", "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+
         return IngestionResponse(
             ingestion_id=ingestion_id,
             filename=sanitized_filename,

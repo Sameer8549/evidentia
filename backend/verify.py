@@ -27,6 +27,23 @@ def verify_receipt(receipt_path: Path, source_path: Path) -> int:
         eprint("[FAIL] Receipt metadata does not contain a source_sha256 hash.")
         return 1
         
+    # Verify receipt digest
+    expected_digest = receipt.get("receipt_digest")
+    if not expected_digest:
+        eprint("[FAIL] Receipt does not contain a receipt_digest.")
+        return 1
+        
+    receipt_copy = receipt.copy()
+    receipt_copy.pop("receipt_digest", None)
+    canonical = json.dumps(receipt_copy, sort_keys=True, separators=(',', ':'))
+    actual_digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+    
+    if actual_digest != expected_digest:
+        eprint(f"[FAIL] Receipt digest mismatch! Expected {expected_digest}, computed {actual_digest}. Receipt was tampered with.")
+        return 1
+        
+    print(f"[PASS] Receipt integrity verified (Digest: {actual_digest}).")
+    
     try:
         sha256_hash = hashlib.sha256()
         with open(source_path, "rb") as f:
@@ -38,7 +55,7 @@ def verify_receipt(receipt_path: Path, source_path: Path) -> int:
         return 1
         
     if actual_hash != expected_hash:
-        eprint(f"[FAIL] Hash mismatch! Receipt says {expected_hash}, source is {actual_hash}.")
+        eprint(f"[FAIL] Source hash mismatch! Receipt says {expected_hash}, source is {actual_hash}. Source was tampered with.")
         return 1
         
     print(f"[PASS] Source document integrity verified (SHA-256: {actual_hash}).")
@@ -48,19 +65,21 @@ def verify_receipt(receipt_path: Path, source_path: Path) -> int:
     failed_checks = [c for c in checks if c.get("outcome") == "FAIL"]
     
     if failed_checks:
-        eprint(f"[WARN] Receipt contains {len(failed_checks)} failed deterministic checks.")
+        eprint(f"[WARN] Claim-level warning: Receipt contains {len(failed_checks)} failed deterministic checks.")
     
     # Check unverified records
     facts = receipt.get("extracted_facts", [])
     unverified = [f for f in facts if f.get("status") != "SUPPORTED_TEXT"]
     
     if unverified:
-        eprint(f"[WARN] Receipt contains {len(unverified)} facts without supported text evidence.")
+        eprint(f"[WARN] Claim-level warning: Receipt contains {len(unverified)} facts without supported text evidence.")
         
     global_status = receipt.get("global_status")
     print(f"[INFO] Receipt global status is {global_status}.")
     
     print("[PASS] Receipt verified successfully offline.")
+    print("[NOTE] This verification proves data structure and document match.")
+    print("[NOTE] A digest alone does not prove the issuer's authenticity or provide a digital signature.")
     return 0
     
 if __name__ == "__main__":
