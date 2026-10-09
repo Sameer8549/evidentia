@@ -11,7 +11,7 @@ import sys
 from app.config import settings
 from app.ocr import perform_ocr
 from app.ollama_client import OllamaClient
-from app.evidence import match_claim_to_evidence, run_deterministic_checks, EvidenceRecord
+from app.evidence import match_claim_to_evidence, run_deterministic_checks
 from app.receipt import EvidenceReceipt, ReceiptMetadata, ReceiptProcessing
 from app.analyze import PageAnalysisSchema, ANALYSIS_PROMPT
 from app.resources import enrich_resources
