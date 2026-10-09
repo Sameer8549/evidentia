@@ -152,7 +152,7 @@ def verify_receipt(receipt_path: Path, source_path: Path) -> int:
     expected_digest = receipt["receipt_digest"]
     receipt_copy = dict(receipt)
     receipt_copy.pop("receipt_digest", None)
-    canonical = json.dumps(receipt_copy, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    canonical = json.dumps(receipt_copy, sort_keys=True, separators=(",", ":"))
     actual_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     if actual_digest != expected_digest:
         eprint(
