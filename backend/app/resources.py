@@ -1,12 +1,12 @@
-from typing import List, Optional, Any
-from datetime import datetime
+from typing import List, Any
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 
 class Resource(BaseModel):
     name: str
     url: str
     source_type: str # e.g. "official_portal", "agency", "dataset"
-    retrieval_timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    retrieval_timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
     status: str = "retrieved" # retrieved, failed, skipped
 
 def enrich_resources(actionable_guidance: List[Any]) -> List[Resource]:
