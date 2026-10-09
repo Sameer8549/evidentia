@@ -72,7 +72,9 @@ def test_verify_receipt_rejects_malformed_json_shape(tmp_path: Path, capsys):
     source_path = tmp_path / "source.bin"
     receipt_path = tmp_path / "receipt.json"
     source_path.write_bytes(b"original")
-    receipt_path.write_text(json.dumps({"schema_version": "1.0.0", "metadata": []}), encoding="utf-8")
+    receipt_path.write_text(
+        json.dumps({"schema_version": "1.0.0", "metadata": []}), encoding="utf-8"
+    )
 
     assert verify_receipt(receipt_path, source_path) == 1
     assert "Invalid receipt" in capsys.readouterr().err

@@ -41,12 +41,17 @@ def _validate_receipt_structure(receipt: Any) -> list[str]:
 
     source_hash = metadata.get("source_sha256")
     if not isinstance(source_hash, str) or not _SHA256_RE.fullmatch(source_hash):
-        errors.append("metadata.source_sha256 must be a 64-character SHA-256 hex digest")
+        errors.append(
+            "metadata.source_sha256 must be a 64-character SHA-256 hex digest"
+        )
 
     processing = receipt.get("processing")
     if not isinstance(processing, dict):
         errors.append("processing must be an object")
-    elif not isinstance(processing.get("model_tag"), str) or not processing["model_tag"].strip():
+    elif (
+        not isinstance(processing.get("model_tag"), str)
+        or not processing["model_tag"].strip()
+    ):
         errors.append("processing.model_tag must be a non-empty string")
 
     facts = receipt.get("extracted_facts")
@@ -60,20 +65,27 @@ def _validate_receipt_structure(receipt: Any) -> list[str]:
             continue
         fact_id = fact.get("fact_id")
         if not isinstance(fact_id, str) or not fact_id:
-            errors.append(f"extracted_facts[{index}].fact_id must be a non-empty string")
+            errors.append(
+                f"extracted_facts[{index}].fact_id must be a non-empty string"
+            )
         elif fact_id in fact_ids:
             errors.append(f"duplicate fact_id: {fact_id}")
         else:
             fact_ids.add(fact_id)
         fact_status = fact.get("status")
-        if not isinstance(fact_status, str) or fact_status not in _ALLOWED_CLAIM_STATUSES:
+        if (
+            not isinstance(fact_status, str)
+            or fact_status not in _ALLOWED_CLAIM_STATUSES
+        ):
             errors.append(f"extracted_facts[{index}].status is invalid")
         quotes = fact.get("matched_quotes", [])
         if not isinstance(quotes, list):
             errors.append(f"extracted_facts[{index}].matched_quotes must be an array")
             continue
         if fact.get("status") == "SUPPORTED_TEXT" and not quotes:
-            errors.append(f"extracted_facts[{index}] is SUPPORTED_TEXT but has no matched quote")
+            errors.append(
+                f"extracted_facts[{index}] is SUPPORTED_TEXT but has no matched quote"
+            )
         for quote_index, quote in enumerate(quotes):
             prefix = f"extracted_facts[{index}].matched_quotes[{quote_index}]"
             if not isinstance(quote, dict):
@@ -85,13 +97,27 @@ def _validate_receipt_structure(receipt: Any) -> list[str]:
             matched_text = quote.get("matched_text")
             if not isinstance(page_index, int) or page_index < 0:
                 errors.append(f"{prefix}.page_index must be a non-negative integer")
-            if not isinstance(start, int) or not isinstance(end, int) or start < 0 or end <= start:
-                errors.append(f"{prefix} must contain a valid non-empty character range")
+            if (
+                not isinstance(start, int)
+                or not isinstance(end, int)
+                or start < 0
+                or end <= start
+            ):
+                errors.append(
+                    f"{prefix} must contain a valid non-empty character range"
+                )
             if not isinstance(matched_text, str) or not matched_text:
                 errors.append(f"{prefix}.matched_text must be non-empty")
-            elif isinstance(start, int) and isinstance(end, int) and start >= 0 and end > start:
+            elif (
+                isinstance(start, int)
+                and isinstance(end, int)
+                and start >= 0
+                and end > start
+            ):
                 if len(matched_text) != end - start:
-                    errors.append(f"{prefix}.matched_text length does not match its character range")
+                    errors.append(
+                        f"{prefix}.matched_text length does not match its character range"
+                    )
             boxes = quote.get("bounding_boxes", [])
             if not isinstance(boxes, list):
                 errors.append(f"{prefix}.bounding_boxes must be an array")
@@ -102,7 +128,9 @@ def _validate_receipt_structure(receipt: Any) -> list[str]:
                         not isinstance(box.get(key), int) or box[key] < 0
                         for key in ("x", "y", "width", "height")
                     ):
-                        errors.append(f"{box_prefix} must have non-negative integer x, y, width, height")
+                        errors.append(
+                            f"{box_prefix} must have non-negative integer x, y, width, height"
+                        )
 
     checks = receipt.get("deterministic_checks")
     if not isinstance(checks, list):
@@ -116,8 +144,12 @@ def _validate_receipt_structure(receipt: Any) -> list[str]:
         if not isinstance(outcome, str) or outcome not in _ALLOWED_CHECK_OUTCOMES:
             errors.append(f"deterministic_checks[{index}].outcome is invalid")
         evidence_used = check.get("evidence_used", [])
-        if not isinstance(evidence_used, list) or any(not isinstance(item, str) for item in evidence_used):
-            errors.append(f"deterministic_checks[{index}].evidence_used must be an array of fact IDs")
+        if not isinstance(evidence_used, list) or any(
+            not isinstance(item, str) for item in evidence_used
+        ):
+            errors.append(
+                f"deterministic_checks[{index}].evidence_used must be an array of fact IDs"
+            )
         elif any(item not in fact_ids for item in evidence_used):
             errors.append(f"deterministic_checks[{index}] references a missing fact ID")
 
@@ -128,7 +160,10 @@ def _validate_receipt_structure(receipt: Any) -> list[str]:
     if not isinstance(resources, list):
         errors.append("resources must be an array")
     global_status = receipt.get("global_status")
-    if not isinstance(global_status, str) or global_status not in _ALLOWED_GLOBAL_STATUSES:
+    if (
+        not isinstance(global_status, str)
+        or global_status not in _ALLOWED_GLOBAL_STATUSES
+    ):
         errors.append("global_status is invalid")
 
     digest = receipt.get("receipt_digest")
@@ -188,25 +223,47 @@ def verify_receipt(receipt_path: Path, source_path: Path) -> int:
         check for check in checks if check.get("outcome") in {"INCONCLUSIVE", "NOT_RUN"}
     ]
     facts = receipt["extracted_facts"]
-    unsupported_facts = [fact for fact in facts if fact.get("status") != "SUPPORTED_TEXT"]
+    unsupported_facts = [
+        fact for fact in facts if fact.get("status") != "SUPPORTED_TEXT"
+    ]
     if failed_checks:
-        print(f"[WARN] {len(failed_checks)} deterministic claim check(s) failed.", file=sys.stderr)
+        print(
+            f"[WARN] {len(failed_checks)} deterministic claim check(s) failed.",
+            file=sys.stderr,
+        )
     if inconclusive_checks:
-        print(f"[WARN] {len(inconclusive_checks)} deterministic claim check(s) were inconclusive or not run.", file=sys.stderr)
+        print(
+            f"[WARN] {len(inconclusive_checks)} deterministic claim check(s) were inconclusive or not run.",
+            file=sys.stderr,
+        )
     if unsupported_facts:
-        print(f"[WARN] {len(unsupported_facts)} fact(s) lack supported text evidence.", file=sys.stderr)
+        print(
+            f"[WARN] {len(unsupported_facts)} fact(s) lack supported text evidence.",
+            file=sys.stderr,
+        )
 
     print(f"[INFO] Receipt global status is {receipt['global_status']}.")
     print("[PASS] Receipt structure, digest, and source-file hash verified offline.")
-    print("[NOTE] Integrity verification does not establish semantic correctness of every claim.")
-    print("[NOTE] A digest alone does not prove issuer authenticity or provide a digital signature.")
+    print(
+        "[NOTE] Integrity verification does not establish semantic correctness of every claim."
+    )
+    print(
+        "[NOTE] A digest alone does not prove issuer authenticity or provide a digital signature."
+    )
     return 0
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Standalone offline Evidence Receipt verifier.")
+    parser = argparse.ArgumentParser(
+        description="Standalone offline Evidence Receipt verifier."
+    )
     parser.add_argument("receipt", type=Path, help="Path to the receipt JSON file.")
-    parser.add_argument("--source", type=Path, required=True, help="Path to the original source document.")
+    parser.add_argument(
+        "--source",
+        type=Path,
+        required=True,
+        help="Path to the original source document.",
+    )
     arguments = parser.parse_args()
 
     if not arguments.receipt.is_file():

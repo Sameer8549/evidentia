@@ -1,5 +1,4 @@
 from datetime import date, datetime
-import hashlib
 import re
 import uuid
 from typing import Dict, List, Optional
@@ -22,7 +21,9 @@ class EvidenceRecord(BaseModel):
     fact_type: str
     candidate_value: str
     original_quotation: Optional[str] = None
-    status: str = "UNVERIFIED"  # SUPPORTED_TEXT, UNVERIFIED, REVIEW_REQUIRED, VERIFICATION_FAILED
+    status: str = (
+        "UNVERIFIED"  # SUPPORTED_TEXT, UNVERIFIED, REVIEW_REQUIRED, VERIFICATION_FAILED
+    )
     matched_quotes: List[MatchedQuote] = Field(default_factory=list)
     explanation: Optional[str] = None
 
@@ -205,7 +206,9 @@ def run_deterministic_checks(
                 observed_value=record.original_quotation,
             )
             if candidate_dates and quote_dates:
-                check.outcome = "PASS" if set(candidate_dates) <= set(quote_dates) else "FAIL"
+                check.outcome = (
+                    "PASS" if set(candidate_dates) <= set(quote_dates) else "FAIL"
+                )
                 check.explanation = (
                     "Parsed candidate date agrees with quotation."
                     if check.outcome == "PASS"
@@ -213,7 +216,9 @@ def run_deterministic_checks(
                 )
             else:
                 check.outcome = "INCONCLUSIVE"
-                check.explanation = "Could not unambiguously parse both candidate and quoted dates."
+                check.explanation = (
+                    "Could not unambiguously parse both candidate and quoted dates."
+                )
             checks.append(check)
 
         elif record.fact_type == "fees_and_amounts":
@@ -226,7 +231,9 @@ def run_deterministic_checks(
                 observed_value=record.original_quotation,
             )
             if candidate_amounts and quote_amounts:
-                check.outcome = "PASS" if set(candidate_amounts) <= set(quote_amounts) else "FAIL"
+                check.outcome = (
+                    "PASS" if set(candidate_amounts) <= set(quote_amounts) else "FAIL"
+                )
                 check.explanation = (
                     "Parsed candidate amount agrees with quotation."
                     if check.outcome == "PASS"
@@ -234,7 +241,9 @@ def run_deterministic_checks(
                 )
             else:
                 check.outcome = "INCONCLUSIVE"
-                check.explanation = "Could not unambiguously parse both candidate and quoted amounts."
+                check.explanation = (
+                    "Could not unambiguously parse both candidate and quoted amounts."
+                )
             checks.append(check)
 
     return checks
