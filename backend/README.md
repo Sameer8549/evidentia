@@ -46,13 +46,25 @@ poetry run uvicorn app.main:app --reload
   - Coordinate convention: Origin `(0, 0)` is the top-left corner of the image.
   - Character alignment spans (`char_start`, `char_end`) aligning with the reconstructed text array to assist later highlight correlation.
 
+### 3. Multimodal Analysis (Gemma 4)
+**Endpoint**: `POST /api/analyze/{ingestion_id}`
+- Triggers local Gemma 4 multimodal vision inference on the ingested document.
+- **Privacy Notice**: Keeps all image and processing strictly local. Documents are never transmitted to cloud services.
+- Returns a structured Pydantic-validated JSON extraction containing:
+  - Document summary and purpose.
+  - Key dates, deadlines, criteria, and requirements.
+  - Candidate quotations grounded in the text.
+  - Next-step actionable guidance for community members.
+- If Ollama is unreachable or the model is missing, it fails gracefully with `HTTP 503`.
+
 ## Testing
 Run unit tests with pytest:
 ```bash
 poetry run pytest
 ```
-*Note: Real OCR integration tests are executed only if a working Tesseract installation is detected on the local system.*
+*Note: Real OCR and Multimodal integration tests are executed only if Tesseract and Ollama (with Gemma 4) are detected natively on the host system. Missing dependencies safely skip without causing false test failures.*
 
 ## Known Limitations
 - OCR does not confirm truthfulness of recognized text; it only executes pattern recognition of document pixels.
 - Blank pages or pages with exceptionally complex noise might raise empty-text warnings.
+- Gemma 4 runs purely locally. Model hallucinations in JSON schema matching may trigger validation errors in complex edge cases.

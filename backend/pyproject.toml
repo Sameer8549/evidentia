@@ -16,7 +16,7 @@ python-multipart = "^0.0.9"
 pymupdf = "^1.24.4"
 pillow = "^10.3.0"
 pytesseract = "^0.3.10"
-
+httpx = "^0.27.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"

@@ -25,6 +25,7 @@ app = FastAPI(
 
 from app.ingestion import router as ingestion_router
 from app.ocr import router as ocr_router
+from app.analyze import router as analyze_router
 
 @app.get("/")
 def read_root():
@@ -32,3 +33,4 @@ def read_root():
 
 app.include_router(ingestion_router, prefix="/api")
 app.include_router(ocr_router, prefix="/api")
+app.include_router(analyze_router, prefix="/api")
