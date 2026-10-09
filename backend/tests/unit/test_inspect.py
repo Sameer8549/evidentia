@@ -3,7 +3,7 @@ from httpx import AsyncClient
 from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
-from PIL import Image, ImageDraw
+from PIL import Image
 import json
 import hashlib
 
