@@ -78,24 +78,31 @@ async def test_full_workflow_e2e(async_client: AsyncClient):
         deadline_fact = next((f for f in extracted_facts if f["fact_type"] == "dates_and_deadlines"), None)
         assert deadline_fact is not None, "Did not extract dates_and_deadlines"
         assert "18 October 2026" in deadline_fact.get("candidate_value", "") or "18 October 2026" in deadline_fact.get("original_quotation", ""), "Did not extract the correct deadline"
-        
+        assert deadline_fact.get("status") == "SUPPORTED_TEXT", f"Deadline quotation was not located in OCR: {deadline_fact}"
+        assert deadline_fact.get("matched_quotes"), "Deadline has no source quote locations"
+        assert any("18 October 2026" in match.get("matched_text", "") for match in deadline_fact["matched_quotes"]), "Matched deadline quote does not contain the expected date"
+
         # Find the required document fact
         doc_fact = next((f for f in extracted_facts if f["fact_type"] == "required_documents"), None)
         assert doc_fact is not None, "Did not extract required_documents"
         assert "ID proof" in doc_fact.get("candidate_value", "") or "ID proof" in doc_fact.get("original_quotation", ""), "Did not extract the correct required document"
-        
-        # Assert candidate quotations match OCR text
+        assert doc_fact.get("status") == "SUPPORTED_TEXT", f"Required-document quotation was not located in OCR: {doc_fact}"
+        assert doc_fact.get("matched_quotes"), "Required document has no source quote locations"
+        assert any("ID proof" in match.get("matched_text", "") for match in doc_fact["matched_quotes"]), "Matched required-document quote does not contain ID proof"
+
+        # Assert each supported quote maps to actual OCR character spans and word boxes.
         for fact in extracted_facts:
             if fact.get("status") == "SUPPORTED_TEXT":
-                assert fact.get("original_quotation") is not None
-                assert len(fact.get("matched_quotes", [])) > 0
-                for mq in fact["matched_quotes"]:
-                    assert "char_start" in mq
-                    assert "char_end" in mq
-                    assert "matched_text" in mq
-                    assert len(mq.get("bounding_boxes", [])) > 0
-                    for box in mq["bounding_boxes"]:
-                        assert "x" in box and "y" in box and "width" in box and "height" in box
+                assert fact.get("original_quotation")
+                assert fact.get("matched_quotes")
+                for match in fact["matched_quotes"]:
+                    start, end = match["char_start"], match["char_end"]
+                    assert 0 <= start < end
+                    assert len(match["matched_text"]) == end - start
+                    assert match["matched_text"]
+                    assert match.get("bounding_boxes"), f"Matched quote lacks OCR word boxes: {match}"
+                    for box in match["bounding_boxes"]:
+                        assert all(isinstance(box.get(key), int) and box[key] >= 0 for key in ("x", "y", "width", "height"))
         
         # 6. Verify standalone
         receipt_path = Path(settings.evidentia_data_dir) / ingestion_id / "receipt.json"
