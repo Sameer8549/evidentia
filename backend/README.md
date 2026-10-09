@@ -46,19 +46,41 @@ poetry run uvicorn app.main:app --reload
   - Coordinate convention: Origin `(0, 0)` is the top-left corner of the image.
   - Character alignment spans (`char_start`, `char_end`) aligning with the reconstructed text array to assist later highlight correlation.
 
-### 3. Multimodal Analysis (Gemma 4)
-**Endpoint**: `POST /api/analyze/{ingestion_id}`
-- Triggers local Gemma 4 multimodal vision inference on the ingested document.
-- **Privacy Notice**: Keeps all image and processing strictly local. Documents are never transmitted to cloud services.
-- Returns a structured Pydantic-validated JSON extraction containing:
-  - Document summary and purpose.
-  - Key dates, deadlines, criteria, and requirements.
-  - Candidate quotations grounded in the text.
-  - Next-step actionable guidance for community members.
-- If Ollama is unreachable or the model is missing, it fails gracefully with `HTTP 503`.
+### 4. End-to-End Workflow Inspection
+**Endpoint**: `POST /api/inspect/{ingestion_id}?fetch_resources=true`
+- Orchestrates the full process: OCR -> Multimodal Extraction -> Evidence Matching -> Deterministic Checks -> Enrichment -> Receipt Generation.
+- Generates an offline verifiable `receipt.json`.
+
+## Local Mentor Demonstration
+You can run a complete offline demonstration using terminal tools:
+
+1. **Start the API Server**
+```bash
+poetry run fastapi dev app/main.py --host 127.0.0.1 --port 8000
+```
+2. **Check System Readiness**
+```bash
+curl http://127.0.0.1:8000/health/ready
+```
+3. **Run Ingestion**
+```bash
+# Upload a notice document
+curl -X POST -F "file=@sample_notice.pdf" http://127.0.0.1:8000/api/ingest
+```
+*(Copy the returned `ingestion_id`)*
+
+4. **Run E2E Inspection**
+```bash
+curl -X POST http://127.0.0.1:8000/api/inspect/<INGESTION_ID>?fetch_resources=true
+```
+
+5. **Standalone Offline Verification**
+```bash
+poetry run python verify.py .local/<INGESTION_ID>/receipt.json --source sample_notice.pdf
+```
 
 ## Testing
-Run unit tests with pytest:
+Run all unit, integration, and E2E tests:
 ```bash
 poetry run pytest
 ```
