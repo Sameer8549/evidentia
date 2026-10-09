@@ -4,9 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 
 app = FastAPI(
-    title="Evidentia",
-    description="Make AI show its evidence.",
-    version="0.1.0"
+    title="Evidentia", description="Make AI show its evidence.", version="0.1.0"
 )
 
 app.add_middleware(
@@ -21,15 +19,17 @@ app.add_middleware(
     allow_headers=["Content-Type", "Accept", "Authorization"],
 )
 
-from app.ingestion import router as ingestion_router
-from app.ocr import router as ocr_router
-from app.analyze import router as analyze_router
-from app.inspect import router as inspect_router
-from app.health import router as health_router
+from app.ingestion import router as ingestion_router  # noqa: E402
+from app.ocr import router as ocr_router  # noqa: E402
+from app.analyze import router as analyze_router  # noqa: E402
+from app.inspect import router as inspect_router  # noqa: E402
+from app.health import router as health_router  # noqa: E402
+
 
 @app.get("/")
 def read_root():
     return {"name": "evidentia-backend", "version": "0.1.0"}
+
 
 app.include_router(health_router)
 app.include_router(ingestion_router, prefix="/api")
