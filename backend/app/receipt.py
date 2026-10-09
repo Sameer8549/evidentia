@@ -31,6 +31,7 @@ class EvidenceReceipt(BaseModel):
     extracted_facts: List[EvidenceRecord] = []
     deterministic_checks: List[DeterministicCheck] = []
     actionable_guidance: List[Dict[str, Any]] = []
+    resources: List[Any] = [] # List[Resource]
     global_status: str
     
     def generate_digest(self) -> str:

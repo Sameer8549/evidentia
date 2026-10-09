@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw
 import json
 
 from app.config import settings
+import app.inspect
 
 @pytest.mark.asyncio
 async def test_inspect_not_found(async_client: AsyncClient):

@@ -9,11 +9,12 @@ from app.ollama_client import OllamaClient
 from app.evidence import match_claim_to_evidence, run_deterministic_checks, EvidenceRecord
 from app.receipt import EvidenceReceipt, ReceiptMetadata, ReceiptProcessing
 from app.schemas import PageAnalysisSchema
+from app.resources import enrich_resources
 
 router = APIRouter()
 
 @router.post("/api/inspect/{ingestion_id}")
-async def run_inspection(ingestion_id: str):
+async def run_inspection(ingestion_id: str, fetch_resources: bool = False):
     ingestion_dir = Path(settings.evidentia_data_dir) / ingestion_id
     if not ingestion_dir.exists():
         raise HTTPException(status_code=404, detail="Ingestion ID not found")
