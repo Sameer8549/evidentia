@@ -1,7 +1,7 @@
 import json
 import hashlib
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 
 from app.evidence import EvidenceRecord, DeterministicCheck
@@ -9,7 +9,7 @@ from app.evidence import EvidenceRecord, DeterministicCheck
 class ReceiptMetadata(BaseModel):
     receipt_id: str
     ingestion_id: str
-    creation_timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    creation_timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
     source_sha256: str
     filename: str
     file_type: str
