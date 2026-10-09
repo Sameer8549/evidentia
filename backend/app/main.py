@@ -11,7 +11,8 @@ class Settings(BaseSettings):
     evidentia_max_pages: int = 20
     evidentia_max_image_dim: int = 8000
     evidentia_max_image_pixels: int = 40000000
-
+    evidentia_tesseract_cmd: str = "tesseract"
+    
     model_config = SettingsConfigDict(env_file=".env")
 
 settings = Settings()
@@ -23,9 +24,11 @@ app = FastAPI(
 )
 
 from app.ingestion import router as ingestion_router
+from app.ocr import router as ocr_router
 
 @app.get("/")
 def read_root():
     return {"name": "evidentia-backend", "version": "0.1.0"}
 
 app.include_router(ingestion_router, prefix="/api")
+app.include_router(ocr_router, prefix="/api")
