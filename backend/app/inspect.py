@@ -127,15 +127,25 @@ async def _run_inspection_task(ingestion_id: str, fetch_resources: bool):
 
     # 4. Run Deterministic checks
     update_job_stage(ingestion_id, "generating_receipt")
-    checks = run_deterministic_checks(extracted_facts)
+    try:
+        checks = run_deterministic_checks(extracted_facts)
+    except Exception as e:
+        update_job_stage(ingestion_id, "failed", status="failed", error=f"Deterministic checks failed: {e}")
+        return
     
     # Generate Receipt
+    if (not metadata.get("sha256") or metadata.get("sha256") == "unknown" or 
+        not metadata.get("original_filename") or metadata.get("original_filename") == "unknown" or 
+        not metadata.get("content_type") or metadata.get("content_type") == "unknown"):
+        update_job_stage(ingestion_id, "failed", status="failed", error="Invalid ingestion metadata: missing required fields")
+        return
+
     receipt_meta = ReceiptMetadata(
         receipt_id=f"rec-{ingestion_id}",
         ingestion_id=ingestion_id,
-        source_sha256=metadata.get("sha256", "unknown"),
-        filename=metadata.get("original_filename", "unknown"),
-        file_type=metadata.get("content_type", "unknown"),
+        source_sha256=metadata["sha256"],
+        filename=metadata["original_filename"],
+        file_type=metadata["content_type"],
         page_count=metadata.get("pages", len(page_files))
     )
     
@@ -143,27 +153,37 @@ async def _run_inspection_task(ingestion_id: str, fetch_resources: bool):
         model_tag=client.model
     )
     
-    resources = enrich_resources(actionable_guidance) if fetch_resources else []
+    try:
+        resources = enrich_resources(actionable_guidance) if fetch_resources else []
+    except Exception as e:
+        update_job_stage(ingestion_id, "failed", status="failed", error=f"Resource enrichment failed: {e}")
+        return
+
     valid_analysis = next((a for a in analysis_results if a is not None), None)
     
-    receipt = EvidenceReceipt(
-        metadata=receipt_meta,
-        processing=receipt_proc,
-        document_summary=valid_analysis.plain_language_summary if valid_analysis else "No summary available.",
-        document_purpose=valid_analysis.document_purpose if valid_analysis else "Unknown",
-        extracted_facts=extracted_facts,
-        deterministic_checks=checks,
-        actionable_guidance=[step.model_dump() for step in actionable_guidance],
-        resources=[r.model_dump() for r in resources],
-        global_status=global_status
-    )
-    
-    receipt.receipt_digest = receipt.generate_digest()
-    receipt_path = ingestion_dir / "receipt.json"
-    with open(receipt_path, 'w', encoding='utf-8') as f:
-        f.write(receipt.model_dump_json(indent=2))
+    try:
+        receipt = EvidenceReceipt(
+            metadata=receipt_meta,
+            processing=receipt_proc,
+            document_summary=valid_analysis.plain_language_summary if valid_analysis else "No summary available.",
+            document_purpose=valid_analysis.document_purpose if valid_analysis else "Unknown",
+            extracted_facts=extracted_facts,
+            deterministic_checks=checks,
+            actionable_guidance=[step.model_dump() if hasattr(step, 'model_dump') else step for step in actionable_guidance],
+            resources=[r.model_dump() for r in resources],
+            global_status=global_status
+        )
         
-    update_job_stage(ingestion_id, "completed", status="completed", receipt_available=True)
+        receipt.receipt_digest = receipt.generate_digest()
+        receipt_path = ingestion_dir / "receipt.json"
+        with open(receipt_path, 'w', encoding='utf-8') as f:
+            f.write(receipt.model_dump_json(indent=2))
+            
+        final_stage = "completed" if global_status == "COMPLETED" else "partial"
+        update_job_stage(ingestion_id, final_stage, status="completed", receipt_available=True)
+    except Exception as e:
+        update_job_stage(ingestion_id, "failed", status="failed", error=f"Receipt generation failed: {e}")
+        return
 
 @router.post("/api/inspect/{ingestion_id}")
 async def run_inspection(ingestion_id: str, fetch_resources: bool = False):
@@ -173,7 +193,10 @@ async def run_inspection(ingestion_id: str, fetch_resources: bool = False):
         raise HTTPException(status_code=404, detail="Ingestion ID not found")
         
     init_job(ingestion_id)
-    await _run_inspection_task(ingestion_id, fetch_resources)
+    try:
+        await _run_inspection_task(ingestion_id, fetch_resources)
+    except Exception as e:
+        update_job_stage(ingestion_id, "failed", status="failed", error=str(e))
     
     job = load_job(ingestion_id)
     if job and job.status == "failed":
@@ -225,22 +248,31 @@ async def get_receipt(ingestion_id: str):
 async def verify_receipt(receipt_file: UploadFile = File(...), source_file: UploadFile = File(...)):
     """Verify a receipt against a source file."""
     import tempfile
-    import os
+    import sys
     import subprocess
     
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_receipt = Path(tmpdir) / "receipt.json"
-        tmp_source = Path(tmpdir) / source_file.filename
+        tmp_source = Path(tmpdir) / "source_doc.bin" # Fixed safe name
         
+        receipt_bytes = await receipt_file.read()
+        source_bytes = await source_file.read()
+        
+        # Enforce file limits
+        max_bytes = settings.evidentia_max_upload_mb * 1024 * 1024
+        if len(source_bytes) > max_bytes:
+            return JSONResponse(status_code=413, content={"verified": False, "details": "Source file exceeds size limit"})
+            
         with open(tmp_receipt, "wb") as f:
-            f.write(await receipt_file.read())
+            f.write(receipt_bytes)
             
         with open(tmp_source, "wb") as f:
-            f.write(await source_file.read())
+            f.write(source_bytes)
             
-        # Use python to run verify.py
+        verify_script = Path(__file__).parent.parent / "verify.py"
+        
         result = subprocess.run([
-            "python", "verify.py", str(tmp_receipt), "--source", str(tmp_source)
+            sys.executable, str(verify_script), str(tmp_receipt), "--source", str(tmp_source)
         ], capture_output=True, text=True)
         
         if result.returncode != 0:

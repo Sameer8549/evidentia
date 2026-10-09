@@ -10,8 +10,16 @@ def get_live():
     
 @router.get("/health/ready")
 async def get_ready():
+    import subprocess
+    from app.config import settings
     # check tesseract
-    tesseract_available = shutil.which("tesseract") is not None
+    tesseract_available = False
+    try:
+        result = subprocess.run([settings.evidentia_tesseract_cmd, "--list-langs"], capture_output=True, text=True)
+        if result.returncode == 0 and "eng" in result.stdout:
+            tesseract_available = True
+    except Exception:
+        pass
     
     # check ollama
     client = OllamaClient()

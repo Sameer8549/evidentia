@@ -1,89 +1,133 @@
 import pytest
 from httpx import AsyncClient
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 import json
 import subprocess
 from pathlib import Path
+import os
+import sys
 
 from app.config import settings
 
+def is_strict_mode():
+    return os.getenv("EVIDENTIA_STRICT_E2E") == "1"
+
 @pytest.mark.asyncio
 async def test_full_workflow_e2e(async_client: AsyncClient):
-    import shutil
-    if not shutil.which("tesseract"):
-        pytest.skip("Tesseract not available for E2E test.")
+    # 1. Dependency Checks
+    try:
+        tess_res = subprocess.run([settings.evidentia_tesseract_cmd, "--list-langs"], capture_output=True, text=True)
+        if tess_res.returncode != 0 or "eng" not in tess_res.stdout:
+            raise ValueError("Tesseract not properly configured or missing 'eng' data.")
+    except Exception as e:
+        if is_strict_mode(): pytest.fail(f"Strict Mode: {e}")
+        else: pytest.skip(f"Tesseract missing: {e}")
         
-    # Check Ollama
     try:
         from app.ollama_client import OllamaClient
         client = OllamaClient()
         await client.check_health()
-    except Exception:
-        pytest.skip("Ollama not available for E2E test.")
+    except Exception as e:
+        if is_strict_mode(): pytest.fail(f"Strict Mode: {e}")
+        else: pytest.skip(f"Ollama missing: {e}")
         
-    # 1. Create a synthetic image
+    # 2. Create synthetic image and PDF
     ingestion_dir = Path(settings.evidentia_data_dir) / "test_e2e_source"
     ingestion_dir.mkdir(parents=True, exist_ok=True)
     img_path = ingestion_dir / "e2e_notice.png"
+    pdf_path = ingestion_dir / "e2e_notice.pdf"
     
-    img = Image.new("RGB", (1200, 800), color="white")
+    img = Image.new("RGB", (1600, 1200), color="white")
     d = ImageDraw.Draw(img)
-    d.text((10,10), "COMMUNITY NOTICE", fill=(0,0,0))
-    d.text((10,50), "Application deadline: 18 October 2026", fill=(0,0,0))
-    d.text((10,100), "Required document: ID proof", fill=(0,0,0))
+    try:
+        # Pillow 10.1.0+ supports size in load_default
+        font = ImageFont.load_default(size=48)
+    except TypeError:
+        font = ImageFont.load_default()
+        
+    d.text((50,50), "COMMUNITY NOTICE", fill=(0,0,0), font=font)
+    d.text((50,150), "Application deadline: 18 October 2026", fill=(0,0,0), font=font)
+    d.text((50,250), "Required document: ID proof", fill=(0,0,0), font=font)
     img.save(img_path)
+    img.save(pdf_path, "PDF", resolution=100.0)
     
-    # 2. Ingest
-    with open(img_path, "rb") as f:
-        files = {"file": ("e2e_notice.png", f, "image/png")}
-        response = await async_client.post("/api/ingest", files=files)
+    for file_to_test in [img_path, pdf_path]:
+        # 3. Ingest
+        with open(file_to_test, "rb") as f:
+            mime = "application/pdf" if file_to_test.suffix == ".pdf" else "image/png"
+            files = {"file": (file_to_test.name, f, mime)}
+            response = await async_client.post("/api/ingest", files=files)
+            
+        assert response.status_code == 200
+        ingestion_data = response.json()
+        ingestion_id = ingestion_data["ingestion_id"]
         
-    assert response.status_code == 200
-    ingestion_data = response.json()
-    ingestion_id = ingestion_data["ingestion_id"]
-    
-    # 3. Inspect (this runs OCR + Analyze + Match + Checks + Resources + Receipt)
-    response = await async_client.post(f"/api/inspect/{ingestion_id}?fetch_resources=true")
-    assert response.status_code == 200
-    receipt_data = response.json()
-    
-    assert receipt_data["metadata"]["ingestion_id"] == ingestion_id
-    assert receipt_data["global_status"] == "COMPLETED"
-    
-    # 4. Verify standalone
-    receipt_path = Path(settings.evidentia_data_dir) / ingestion_id / "receipt.json"
-    assert receipt_path.exists()
-    
-    result = subprocess.run([
-        "python", "verify.py", str(receipt_path), "--source", str(img_path)
-    ], capture_output=True, text=True)
-    
-    assert result.returncode == 0
-    assert "[PASS]" in result.stdout
-
-    # 5. Tamper with source and check verification fails
-    with open(img_path, "a") as f:
-        f.write("tampered")
+        # 4. Inspect
+        # Synchronous backward-compatible endpoint triggers the whole flow
+        response = await async_client.post(f"/api/inspect/{ingestion_id}?fetch_resources=true", timeout=600.0)
+        assert response.status_code == 200, f"Inspect failed: {response.text}"
+        receipt_data = response.json()
         
-    result_source_tamper = subprocess.run([
-        "python", "verify.py", str(receipt_path), "--source", str(img_path)
-    ], capture_output=True, text=True)
-    assert result_source_tamper.returncode == 1
-    assert "Source hash mismatch" in result_source_tamper.stderr
-    
-    # 6. Tamper with receipt and check digest verification fails
-    with open(receipt_path, "r", encoding="utf-8") as f:
-        tampered_receipt = json.load(f)
+        assert receipt_data["metadata"]["ingestion_id"] == ingestion_id
+        assert receipt_data["global_status"] == "COMPLETED"
         
-    tampered_receipt["global_status"] = "FAKE_STATUS"
-    
-    with open(receipt_path, "w", encoding="utf-8") as f:
-        json.dump(tampered_receipt, f)
+        # 5. Assert Extractions
+        extracted_facts = receipt_data.get("extracted_facts", [])
         
-    result_receipt_tamper = subprocess.run([
-        # Re-use the original source path which doesn't matter since digest fails first
-        "python", "verify.py", str(receipt_path), "--source", str(img_path)
-    ], capture_output=True, text=True)
-    
-    assert result_receipt_tamper.returncode == 1
-    assert "Receipt digest mismatch" in result_receipt_tamper.stderr
+        # Find the deadline fact
+        deadline_fact = next((f for f in extracted_facts if f["fact_type"] == "dates_and_deadlines"), None)
+        assert deadline_fact is not None, "Did not extract dates_and_deadlines"
+        assert "18 October 2026" in deadline_fact["candidate_value"] or "18 October 2026" in deadline_fact["matched_quotation"], "Did not extract the correct deadline"
+        
+        # Find the required document fact
+        doc_fact = next((f for f in extracted_facts if f["fact_type"] == "required_documents"), None)
+        assert doc_fact is not None, "Did not extract required_documents"
+        assert "ID proof" in doc_fact["candidate_value"] or "ID proof" in doc_fact["matched_quotation"], "Did not extract the correct required document"
+        
+        # Assert candidate quotations match OCR text
+        for fact in extracted_facts:
+            if fact["is_grounded"]:
+                assert fact["matched_quotation"] is not None
+                assert len(fact["evidence_coordinates"]) > 0
+                for coord in fact["evidence_coordinates"]:
+                    assert "x" in coord and "y" in coord and "width" in coord and "height" in coord
+        
+        # 6. Verify standalone
+        receipt_path = Path(settings.evidentia_data_dir) / ingestion_id / "receipt.json"
+        assert receipt_path.exists()
+        
+        verify_script = Path(__file__).parent.parent.parent / "verify.py"
+        
+        result = subprocess.run([
+            sys.executable, str(verify_script), str(receipt_path), "--source", str(file_to_test)
+        ], capture_output=True, text=True)
+        
+        assert result.returncode == 0
+        assert "[PASS]" in result.stdout
+        
+        # 7. Tamper with source and check verification fails
+        with open(file_to_test, "ab") as f:
+            f.write(b"tampered")
+            
+        result_source_tamper = subprocess.run([
+            sys.executable, str(verify_script), str(receipt_path), "--source", str(file_to_test)
+        ], capture_output=True, text=True)
+        assert result_source_tamper.returncode == 1
+        assert "Source hash mismatch" in result_source_tamper.stderr
+        
+        # 8. Tamper with receipt and check digest verification fails
+        with open(receipt_path, "r", encoding="utf-8") as f:
+            tampered_receipt = json.load(f)
+            
+        tampered_receipt["global_status"] = "FAKE_STATUS"
+        
+        with open(receipt_path, "w", encoding="utf-8") as f:
+            json.dump(tampered_receipt, f)
+            
+        result_receipt_tamper = subprocess.run([
+            # Re-use the original source path which doesn't matter since digest fails first
+            sys.executable, str(verify_script), str(receipt_path), "--source", str(file_to_test)
+        ], capture_output=True, text=True)
+        
+        assert result_receipt_tamper.returncode == 1
+        assert "Receipt digest mismatch" in result_receipt_tamper.stderr

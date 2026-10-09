@@ -23,9 +23,12 @@ class OllamaClient:
                 
                 model_names = [m.get("name") for m in tags]
                 if self.model not in model_names:
-                    # sometimes the tag is returned without :latest if it's implicitly latest
-                    # let's be lenient or check properly
-                    if not any(m.startswith(self.model.split(":")[0]) for m in model_names):
+                    # sometimes the model might lack ':latest', so check both
+                    possible_names = [self.model]
+                    if ":" not in self.model:
+                        possible_names.append(f"{self.model}:latest")
+                    
+                    if not any(name in model_names for name in possible_names):
                         raise ValueError(f"Model {self.model} is not available in Ollama.")
                         
                 return True
