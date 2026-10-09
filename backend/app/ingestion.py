@@ -4,7 +4,7 @@ import shutil
 import uuid
 import re
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
 import fitz  # PyMuPDF
 from PIL import Image, UnidentifiedImageError
