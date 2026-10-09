@@ -1,4 +1,3 @@
-import pytest
 from app.evidence import match_claim_to_evidence, run_deterministic_checks, EvidenceRecord
 from app.ocr import OCRPageResult, OCRWord
 
