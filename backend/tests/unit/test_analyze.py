@@ -105,26 +105,36 @@ async def test_analyze_unknown_ingestion_id(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_analyze_integration(async_client: AsyncClient):
+    import os
+    is_strict = os.getenv("EVIDENTIA_STRICT_E2E") == "1"
+    
     client = OllamaClient()
     try:
         await client.check_health()
-    except Exception:
-        pytest.skip("Ollama or configured model is not available in environment. Skipping integration test.")
+    except Exception as e:
+        if is_strict:
+            pytest.fail(f"Strict mode: Ollama must be available. {e}")
+        else:
+            pytest.skip("Ollama or configured model is not available in environment. Skipping integration test.")
         
     ingestion_id = "test-analyze-real"
     ingestion_dir = Path(settings.evidentia_data_dir) / ingestion_id
     ingestion_dir.mkdir(parents=True)
     
-    img = Image.new("RGB", (200, 100), color="white")
+    from PIL import ImageFont
+    img = Image.new("RGB", (1600, 1200), color="white")
     d = ImageDraw.Draw(img)
-    d.text((10,10), "COMMUNITY NOTICE", fill=(0,0,0))
-    d.text((10,30), "Application deadline: 18 October 2026", fill=(0,0,0))
-    d.text((10,50), "Required document: ID proof", fill=(0,0,0))
-    # Scale it up to make it readable for the vision model
-    img = img.resize((1000, 500), Image.NEAREST)
+    try:
+        font = ImageFont.load_default(size=48)
+    except TypeError:
+        font = ImageFont.load_default()
+        
+    d.text((50,50), "COMMUNITY NOTICE", fill=(0,0,0), font=font)
+    d.text((50,150), "Application deadline: 18 October 2026", fill=(0,0,0), font=font)
+    d.text((50,250), "Required document: ID proof", fill=(0,0,0), font=font)
     img.save(ingestion_dir / "original", format="PNG") 
     
-    response = await async_client.post(f"/api/analyze/{ingestion_id}")
+    response = await async_client.post(f"/api/analyze/{ingestion_id}", timeout=600.0)
     assert response.status_code == 200
     data = response.json()
     
@@ -132,25 +142,23 @@ async def test_analyze_integration(async_client: AsyncClient):
     page = data["pages"][0]
     if page["status"] == "error":
         print(f"INTEGRATION TEST ERROR: {page['warnings']}")
-        if any("HTTP error: 500" in w for w in page["warnings"]):
+        if any("HTTP error: 500" in w for w in page["warnings"]) and not is_strict:
             pytest.skip("Ollama returned 500 on inference. Environment issue.")
+        else:
+            pytest.fail(f"Integration test failed on page analysis: {page['warnings']}")
             
     analysis = page.get("analysis")
     assert analysis is not None, f"Analysis failed: {page.get('warnings')}"
     
     analysis_dict = analysis if isinstance(analysis, dict) else analysis
     
-    is_notice = "Notice" in analysis.get("document_type", "") or "notice" in analysis.get("document_type", "").lower()
-    dates = [d["fact_description"].lower() for d in analysis.get("dates_and_deadlines", [])]
+    is_notice = "Notice" in analysis_dict.get("document_type", "") or "notice" in analysis_dict.get("document_type", "").lower()
+    assert is_notice, "Document type should be classified as Notice"
+    
+    dates = [d.get("candidate_value", d.get("fact_description", "")).lower() for d in analysis_dict.get("dates_and_deadlines", [])]
     has_deadline = any("18" in d or "october" in d for d in dates)
+    assert has_deadline, f"Did not extract 18 October 2026. Found: {dates}"
     
-    docs = [d["fact_description"].lower() for d in analysis.get("required_documents", [])]
+    docs = [d.get("candidate_value", d.get("fact_description", "")).lower() for d in analysis_dict.get("required_documents", [])]
     has_docs = any("id" in d or "proof" in d for d in docs)
-    
-    # Assert successful retrieval since JSON schema format ensures it won't hallucinate keys, 
-    # and if it reads the image, it should catch at least one of these.
-    # Note: Gemma4 on small bitmapped tests can still miss the text, so we still log and pass if it misses, 
-    # but we STRICTLY enforce it didn't throw validation errors!
-    if not (has_deadline or has_docs or is_notice):
-        print(f"Model failed to extract expected info (likely due to bitmap font). Returned: {analysis}")
-    assert "document_type" in analysis
+    assert has_docs, f"Did not extract ID proof. Found: {docs}"

@@ -57,3 +57,59 @@ async def test_inspect_success(mock_analyze, mock_health, mock_ocr, async_client
     
     # Receipt file should exist
     assert (ingestion_dir / "receipt.json").exists()
+
+@pytest.mark.asyncio
+async def test_verify_receipt_valid(async_client: AsyncClient, tmp_path: Path):
+    receipt_path = tmp_path / "receipt.json"
+    source_path = tmp_path / "source.bin"
+    
+    # Just mock verify.py success by patching subprocess.run inside inspect.py
+    with patch("app.inspect.subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "[PASS] Evidence receipt is valid."
+        
+        with open(receipt_path, "wb") as f: f.write(b"{}")
+        with open(source_path, "wb") as f: f.write(b"data")
+        
+        with open(receipt_path, "rb") as rf, open(source_path, "rb") as sf:
+            files = {
+                "receipt_file": ("receipt.json", rf, "application/json"),
+                "source_file": ("source.bin", sf, "application/octet-stream")
+            }
+            response = await async_client.post("/api/verify", files=files)
+            
+        assert response.status_code == 200
+        assert response.json()["verified"] is True
+
+@pytest.mark.asyncio
+async def test_verify_receipt_oversized(async_client: AsyncClient, monkeypatch):
+    monkeypatch.setattr(settings, "evidentia_max_upload_mb", 1) # 1 MB limit
+    # We can use a custom UploadFile or just create a payload that is > 1MB
+    class DummyUpload:
+        async def read(self, size=-1):
+            if not hasattr(self, 'read_bytes'): self.read_bytes = 0
+            if self.read_bytes >= 2 * 1024 * 1024: return b""
+            chunk = b"0" * 8192
+            self.read_bytes += len(chunk)
+            return chunk
+            
+    with patch("app.inspect.UploadFile.read", side_effect=DummyUpload().read):
+        # We simulate the size limit being exceeded during read
+        # Using the actual endpoint
+        pass
+        
+    # Since streaming limits are best tested with actual large requests:
+    large_data = b"0" * (1024 * 1024 + 1024) # 1MB + 1KB
+    files = {
+        "receipt_file": ("receipt.json", large_data, "application/json"),
+        "source_file": ("source.bin", b"small", "application/octet-stream")
+    }
+    response = await async_client.post("/api/verify", files=files)
+    assert response.status_code == 413
+    
+    files = {
+        "receipt_file": ("receipt.json", b"small", "application/json"),
+        "source_file": ("source.bin", large_data, "application/octet-stream")
+    }
+    response = await async_client.post("/api/verify", files=files)
+    assert response.status_code == 413

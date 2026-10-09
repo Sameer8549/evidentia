@@ -16,6 +16,12 @@ from app.jobs import init_job, update_job_stage, update_job_progress, load_job
 router = APIRouter()
 
 async def _run_inspection_task(ingestion_id: str, fetch_resources: bool):
+    try:
+        await _run_inspection_task_inner(ingestion_id, fetch_resources)
+    except Exception as e:
+        update_job_stage(ingestion_id, "failed", status="failed", error=f"Unexpected error: {e}")
+
+async def _run_inspection_task_inner(ingestion_id: str, fetch_resources: bool):
     ingestion_dir = Path(settings.evidentia_data_dir) / ingestion_id
     if not ingestion_dir.exists():
         update_job_stage(ingestion_id, "failed", status="failed", error="Ingestion ID not found")
@@ -251,24 +257,30 @@ async def verify_receipt(receipt_file: UploadFile = File(...), source_file: Uplo
     import sys
     import subprocess
     
+    max_bytes = settings.evidentia_max_upload_mb * 1024 * 1024
+    
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_receipt = Path(tmpdir) / "receipt.json"
         tmp_source = Path(tmpdir) / "source_doc.bin" # Fixed safe name
         
-        receipt_bytes = await receipt_file.read()
-        source_bytes = await source_file.read()
-        
-        # Enforce file limits
-        max_bytes = settings.evidentia_max_upload_mb * 1024 * 1024
-        if len(source_bytes) > max_bytes:
-            return JSONResponse(status_code=413, content={"verified": False, "details": "Source file exceeds size limit"})
-            
+        # Safely stream receipt
+        receipt_size = 0
         with open(tmp_receipt, "wb") as f:
-            f.write(receipt_bytes)
-            
+            while chunk := await receipt_file.read(8192):
+                receipt_size += len(chunk)
+                if receipt_size > max_bytes:
+                    return JSONResponse(status_code=413, content={"verified": False, "details": "Receipt file exceeds size limit"})
+                f.write(chunk)
+                
+        # Safely stream source
+        source_size = 0
         with open(tmp_source, "wb") as f:
-            f.write(source_bytes)
-            
+            while chunk := await source_file.read(8192):
+                source_size += len(chunk)
+                if source_size > max_bytes:
+                    return JSONResponse(status_code=413, content={"verified": False, "details": "Source file exceeds size limit"})
+                f.write(chunk)
+                
         verify_script = Path(__file__).parent.parent / "verify.py"
         
         result = subprocess.run([

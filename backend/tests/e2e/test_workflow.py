@@ -77,20 +77,25 @@ async def test_full_workflow_e2e(async_client: AsyncClient):
         # Find the deadline fact
         deadline_fact = next((f for f in extracted_facts if f["fact_type"] == "dates_and_deadlines"), None)
         assert deadline_fact is not None, "Did not extract dates_and_deadlines"
-        assert "18 October 2026" in deadline_fact["candidate_value"] or "18 October 2026" in deadline_fact["matched_quotation"], "Did not extract the correct deadline"
+        assert "18 October 2026" in deadline_fact.get("candidate_value", "") or "18 October 2026" in deadline_fact.get("original_quotation", ""), "Did not extract the correct deadline"
         
         # Find the required document fact
         doc_fact = next((f for f in extracted_facts if f["fact_type"] == "required_documents"), None)
         assert doc_fact is not None, "Did not extract required_documents"
-        assert "ID proof" in doc_fact["candidate_value"] or "ID proof" in doc_fact["matched_quotation"], "Did not extract the correct required document"
+        assert "ID proof" in doc_fact.get("candidate_value", "") or "ID proof" in doc_fact.get("original_quotation", ""), "Did not extract the correct required document"
         
         # Assert candidate quotations match OCR text
         for fact in extracted_facts:
-            if fact["is_grounded"]:
-                assert fact["matched_quotation"] is not None
-                assert len(fact["evidence_coordinates"]) > 0
-                for coord in fact["evidence_coordinates"]:
-                    assert "x" in coord and "y" in coord and "width" in coord and "height" in coord
+            if fact.get("status") == "SUPPORTED_TEXT":
+                assert fact.get("original_quotation") is not None
+                assert len(fact.get("matched_quotes", [])) > 0
+                for mq in fact["matched_quotes"]:
+                    assert "char_start" in mq
+                    assert "char_end" in mq
+                    assert "matched_text" in mq
+                    assert len(mq.get("bounding_boxes", [])) > 0
+                    for box in mq["bounding_boxes"]:
+                        assert "x" in box and "y" in box and "width" in box and "height" in box
         
         # 6. Verify standalone
         receipt_path = Path(settings.evidentia_data_dir) / ingestion_id / "receipt.json"
