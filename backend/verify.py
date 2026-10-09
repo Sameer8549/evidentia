@@ -65,7 +65,8 @@ def _validate_receipt_structure(receipt: Any) -> list[str]:
             errors.append(f"duplicate fact_id: {fact_id}")
         else:
             fact_ids.add(fact_id)
-        if fact.get("status") not in _ALLOWED_CLAIM_STATUSES:
+        fact_status = fact.get("status")
+        if not isinstance(fact_status, str) or fact_status not in _ALLOWED_CLAIM_STATUSES:
             errors.append(f"extracted_facts[{index}].status is invalid")
         quotes = fact.get("matched_quotes", [])
         if not isinstance(quotes, list):
@@ -111,7 +112,8 @@ def _validate_receipt_structure(receipt: Any) -> list[str]:
         if not isinstance(check, dict):
             errors.append(f"deterministic_checks[{index}] must be an object")
             continue
-        if check.get("outcome") not in _ALLOWED_CHECK_OUTCOMES:
+        outcome = check.get("outcome")
+        if not isinstance(outcome, str) or outcome not in _ALLOWED_CHECK_OUTCOMES:
             errors.append(f"deterministic_checks[{index}].outcome is invalid")
         evidence_used = check.get("evidence_used", [])
         if not isinstance(evidence_used, list) or any(not isinstance(item, str) for item in evidence_used):
@@ -126,7 +128,7 @@ def _validate_receipt_structure(receipt: Any) -> list[str]:
     if not isinstance(resources, list):
         errors.append("resources must be an array")
     global_status = receipt.get("global_status")
-    if global_status not in _ALLOWED_GLOBAL_STATUSES:
+    if not isinstance(global_status, str) or global_status not in _ALLOWED_GLOBAL_STATUSES:
         errors.append("global_status is invalid")
 
     digest = receipt.get("receipt_digest")
