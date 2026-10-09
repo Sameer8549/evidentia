@@ -21,15 +21,17 @@ async def test_inspect_success(mock_analyze, mock_health, mock_ocr, async_client
     mock_health.return_value = True
     mock_ocr.return_value = []
     
-    mock_analyze.return_value = {
-        "document_type": "Notice",
-        "dates_and_deadlines": [
+    from app.analyze import PageAnalysisSchema
+    mock_analyze.return_value = PageAnalysisSchema(
+        document_type="Notice",
+        dates_and_deadlines=[
             {
                 "fact_description": "18 October 2026",
-                "candidate_quotation": "18 October 2026"
+                "candidate_quotation": "18 October 2026",
+                "is_missing_or_unknown": False
             }
         ]
-    }
+    )
     
     ingestion_id = "test-inspect-123"
     ingestion_dir = Path(settings.evidentia_data_dir) / ingestion_id
