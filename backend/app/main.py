@@ -20,6 +20,10 @@ app = FastAPI(
     version="0.1.0"
 )
 
+from app.ingestion import router as ingestion_router
+
 @app.get("/")
 def read_root():
     return {"name": "evidentia-backend", "version": "0.1.0"}
+
+app.include_router(ingestion_router, prefix="/api")
