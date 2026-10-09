@@ -7,7 +7,7 @@ from httpx import AsyncClient
 from PIL import Image, ImageDraw
 import json
 
-from app.main import settings
+from app.config import settings
 from app.analyze import PageAnalysisSchema
 from app.ollama_client import OllamaClient
 

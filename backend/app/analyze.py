@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Optional
 import json
 
-from app.main import settings
+from app.config import settings
 from app.ollama_client import OllamaClient
 
 router = APIRouter()

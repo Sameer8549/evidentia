@@ -9,7 +9,7 @@ from pydantic import BaseModel
 import fitz  # PyMuPDF
 from PIL import Image, UnidentifiedImageError
 
-from app.main import settings
+from app.config import settings
 
 router = APIRouter()
 

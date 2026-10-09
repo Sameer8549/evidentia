@@ -6,7 +6,7 @@ from PIL import Image
 from typing import List, Optional
 import os
 
-from app.main import settings
+from app.config import settings
 
 router = APIRouter()
 

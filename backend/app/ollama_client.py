@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, ValidationError
 from typing import List, Optional
 
-from app.main import settings
+from app.config import settings
 
 class OllamaClient:
     def __init__(self):

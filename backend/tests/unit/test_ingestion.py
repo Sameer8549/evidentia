@@ -7,7 +7,7 @@ from PIL import Image
 from io import BytesIO
 from httpx import AsyncClient
 from pathlib import Path
-from app.main import settings
+from app.config import settings
 
 @pytest.fixture(autouse=True)
 def setup_teardown_data_dir():
