@@ -117,9 +117,18 @@ async def analyze_document(ingestion_id: str):
             except Exception as e:
                 page_results.append(PageResult(page_index=idx, analysis=None, status="error", warnings=[str(e)]))
                 
+    # Determine global status
+    success_count = sum(1 for p in page_results if p.status == "success")
+    if success_count == 0 and len(page_results) > 0:
+        global_status = "FAILED"
+    elif success_count < len(page_results):
+        global_status = "PARTIAL"
+    else:
+        global_status = "COMPLETED"
+        
     return AnalyzeResponse(
         ingestion_id=ingestion_id,
         model=client.model,
         pages=page_results,
-        global_status="completed"
+        global_status=global_status
     )

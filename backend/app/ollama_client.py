@@ -39,7 +39,7 @@ class OllamaClient:
             
         payload = {
             "model": self.model,
-            "format": "json",
+            "format": schema_class.model_json_schema(),
             "stream": False,
             "messages": [
                 {

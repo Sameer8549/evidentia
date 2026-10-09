@@ -56,7 +56,7 @@ async def test_analyze_mocked_success(mock_analyze, mock_health, async_client: A
     assert response.status_code == 200
     data = response.json()
     
-    assert data["global_status"] == "completed"
+    assert data["global_status"] == "COMPLETED"
     assert len(data["pages"]) == 1
     page = data["pages"][0]
     assert page["status"] == "success"
@@ -93,6 +93,7 @@ async def test_analyze_malformed_json(mock_analyze, mock_health, async_client: A
     assert response.status_code == 200
     data = response.json()
     
+    assert data["global_status"] == "FAILED"
     page = data["pages"][0]
     assert page["status"] == "error"
     assert "malformed JSON structure" in page["warnings"][0]
@@ -129,27 +130,25 @@ async def test_analyze_integration(async_client: AsyncClient):
     
     assert len(data["pages"]) == 1
     page = data["pages"][0]
-    if page["status"] == "error" and "malformed JSON structure" in str(page.get("warnings", [])):
-        print(f"INTEGRATION TEST PASSED (partial): Model ran but hallucinated invalid JSON schema keys: {page['warnings']}")
-        return
+    if page["status"] == "error":
+        print(f"INTEGRATION TEST ERROR: {page['warnings']}")
         
     analysis = page.get("analysis")
-    assert analysis is not None, f"Analysis failed for another reason: {page.get('warnings')}"
+    assert analysis is not None, f"Analysis failed: {page.get('warnings')}"
     
     analysis_dict = analysis if isinstance(analysis, dict) else analysis
     
-    # We will log the analysis if we fail, but for now let's just make the assertion softer for arbitrary LLM variations
     is_notice = "Notice" in analysis.get("document_type", "") or "notice" in analysis.get("document_type", "").lower()
-    
     dates = [d["fact_description"].lower() for d in analysis.get("dates_and_deadlines", [])]
     has_deadline = any("18" in d or "october" in d for d in dates)
     
     docs = [d["fact_description"].lower() for d in analysis.get("required_documents", [])]
     has_docs = any("id" in d or "proof" in d for d in docs)
     
-    # If the model couldn't read the bitmap font and returned Unknown, we don't fail the entire pipeline test
-    # since we proved the structured schema extraction, JSON parsing, and Ollama HTTP pipeline work.
+    # Assert successful retrieval since JSON schema format ensures it won't hallucinate keys, 
+    # and if it reads the image, it should catch at least one of these.
+    # Note: Gemma4 on small bitmapped tests can still miss the text, so we still log and pass if it misses, 
+    # but we STRICTLY enforce it didn't throw validation errors!
     if not (has_deadline or has_docs or is_notice):
         print(f"Model failed to extract expected info (likely due to bitmap font). Returned: {analysis}")
-        # We still assert it's a valid Pydantic model parsed from Ollama
-        assert "document_type" in analysis
+    assert "document_type" in analysis
