@@ -1,10 +1,9 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from pathlib import Path
 import pytesseract
 from PIL import Image
-from typing import List, Optional
-import os
+from typing import List
 
 from app.config import settings
 
