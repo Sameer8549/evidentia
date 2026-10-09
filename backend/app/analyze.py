@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from pathlib import Path
 from typing import List, Optional
-import json
 
 from app.config import settings
 from app.ollama_client import OllamaClient
